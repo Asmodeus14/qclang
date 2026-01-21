@@ -33,14 +33,14 @@ Professional CLI: Clean, informative compiler output with multiple verbosity lev
 Quick Install (Linux/macOS)
 bash
 # One-line install
-curl -fsSL https://raw.githubusercontent.com/yourusername/qclang/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Asmodeus14/qclang/main/install.sh | bash
 
 # Or using cargo (requires Rust)
 cargo install qclang-compiler
 From Source
 bash
 # Clone the repository
-git clone https://github.com/yourusername/qclang.git
+git clone https://github.com/Asmodeus14/qclang.git
 cd qclang/compiler
 
 # Build and install
