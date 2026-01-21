@@ -1,41 +1,85 @@
 name: Release
 
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
-  build-and-upload:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: qclang-linux
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: qclang-macos
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: qclang-windows.exe
-
+  build:
+    runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
-
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Upload binary as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: x86_64-unknown-linux-gnu,x86_64-pc-windows-gnu
+        override: true
+    
+    - name: Install Windows target
+      run: |
+        rustup target add x86_64-pc-windows-gnu
+        sudo apt-get update
+        sudo apt-get install -y gcc-mingw-w64-x86-64
+    
+    - name: Build Linux
+      run: |
+        cd compiler
+        cargo build --release --target x86_64-unknown-linux-gnu
+        mkdir -p ../dist/linux
+        cp target/x86_64-unknown-linux-gnu/release/qclang ../dist/linux/qclang-linux
+    
+    - name: Build Windows
+      run: |
+        cd compiler
+        cargo build --release --target x86_64-pc-windows-gnu
+        mkdir -p ../dist/windows
+        cp target/x86_64-pc-windows-gnu/release/qclang.exe ../dist/windows/qclang-windows.exe
+    
+    - name: Copy examples
+      run: |
+        mkdir -p dist/common/examples
+        cp libs/examples/*.qc dist/common/examples/
+    
+    - name: Create checksums
+      run: |
+        cd dist
+        sha256sum windows/*.exe linux/* > checksums.txt
+    
+    - name: Create release archives
+      run: |
+        mkdir -p release
+        cp -r dist release/
+        cp README.md release/
+        
+        cd release
+        tar -czf qclang-linux.tar.gz -C dist/linux qclang-linux -C ../dist/common/examples .
+        zip -j qclang-windows.zip dist/windows/qclang-windows.exe
+        
+        echo "Linux SHA256:"
+        sha256sum qclang-linux.tar.gz
+        
+        echo "Windows SHA256:"
+        sha256sum qclang-windows.zip
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: qclang-builds
+        path: |
+          release/
+          dist/
+    
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release/qclang-linux.tar.gz
+          release/qclang-windows.zip
+          dist/checksums.txt
+        generate_release_notes: true
