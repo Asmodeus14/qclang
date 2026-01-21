@@ -30,10 +30,16 @@ OpenQASM Output: Compatible with all major quantum computing platforms
 Professional CLI: Clean, informative compiler output with multiple verbosity levels
 
 📦 Installation
-Quick Install (Linux/macOS)
-bash
-# One-line install
-curl -fsSL https://raw.githubusercontent.com/yourusername/qclang/main/install.sh | bash
+## 🚀 Quick Installation
+
+### **Windows (CMD/PowerShell)**
+```cmd
+# One-line install (PowerShell as admin)
+powershell -Command "iwr -useb https://raw.githubusercontent.com/Asmodeus14/qclang/master/scripts/windows/install.ps1 | iex"
+
+# Or download and run installer
+curl -LO https://raw.githubusercontent.com/Asmodeus14/qclang/master/scripts/windows/install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
 
 # Or using cargo (requires Rust)
 cargo install qclang-compiler
