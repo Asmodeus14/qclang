@@ -1,0 +1,35 @@
+[package]
+name = "qclang-compiler"
+version = "0.2.0"
+edition = "2021"
+description = "A quantum systems programming language with C-like syntax"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT"
+repository = "https://github.com/yourusername/qclang"
+homepage = "https://github.com/yourusername/qclang"
+documentation = "https://github.com/yourusername/qclang"
+readme = "README.md"
+keywords = ["quantum", "compiler", "programming-language", "qasm"]
+categories = ["science", "development-tools::build-tools"]
+
+[[bin]]
+name = "qclang"
+path = "src/bin/qclang.rs"
+
+[[bin]]
+name = "qclang-test"
+path = "src/main.rs"
+
+[lib]
+name = "qclang_compiler"
+path = "src/lib.rs"
+
+[dependencies]
+logos = "0.13"
+logos-derive = "0.13"
+clap = { version = "4.0", features = ["derive"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
