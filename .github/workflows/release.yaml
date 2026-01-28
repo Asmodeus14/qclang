@@ -10,7 +10,7 @@ permissions:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
-    defaults:  # ✅ ADD THIS
+    defaults:
       run:
         working-directory: ./compiler
     steps:
@@ -29,11 +29,12 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: qclang-linux
-        path: compiler/target/x86_64-unknown-linux-gnu/release/qclang  # ✅ UPDATED PATH
+        path: compiler/target/x86_64-unknown-linux-gnu/release/qclang
+        retention-days: 1  # Optional: keep for debugging
 
   build-windows:
     runs-on: windows-latest
-    defaults:  # ✅ ADD THIS
+    defaults:
       run:
         working-directory: ./compiler
     steps:
@@ -51,38 +52,55 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: qclang-windows
-        path: compiler/target/x86_64-pc-windows-msvc/release/qclang.exe  # ✅ UPDATED PATH
+        path: compiler/target/x86_64-pc-windows-msvc/release/qclang.exe
+        retention-days: 1
 
   release:
     needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
+    if: success()  # Only run if both builds succeeded
     
     steps:
     - name: Download Linux Artifact
       uses: actions/download-artifact@v4
       with:
         name: qclang-linux
+        path: .  # ✅ Download to current directory
         
     - name: Download Windows Artifact
       uses: actions/download-artifact@v4
       with:
-        name: qclang-windows
+        name: qclang-windows  
+        path: .  # ✅ Download to current directory
+        
+    - name: List Downloaded Files
+      run: |
+        echo "Current directory structure:"
+        find . -type f -name "qclang*" | sort
+        echo ""
+        ls -la
         
     - name: Create Release Packages
       run: |
         mkdir -p release
         
-        # Package Linux binary
-        mv qclang-linux/qclang release/qclang-linux-x86_64
-        tar -czf release/qclang-linux-x86_64.tar.gz -C release qclang-linux-x86_64
+        # Copy binaries (they're in current directory)
+        cp qclang release/qclang-linux-x86_64
+        cp qclang.exe release/qclang-windows-x86_64.exe
         
-        # Package Windows binary  
-        mv qclang-windows/qclang.exe release/qclang-windows-x86_64.exe
+        # Verify
+        echo "Release files:"
+        ls -la release/
+        
+        # Create packages
+        tar -czf release/qclang-linux-x86_64.tar.gz -C release qclang-linux-x86_64
         zip release/qclang-windows-x86_64.zip release/qclang-windows-x86_64.exe
         
-        # Create checksums
+        # Checksums
         cd release
         sha256sum * > sha256sums.txt
+        echo ""
+        echo "Final packages:"
         ls -lh
     
     - name: Create GitHub Release
@@ -90,3 +108,4 @@ jobs:
       with:
         files: release/*
         generate_release_notes: true
+        draft: true  # Set to true if you want to review first
