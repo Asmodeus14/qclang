@@ -4,7 +4,7 @@
 > **Schrödinger’s Companion** — a modern, type-safe quantum systems programming language.
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-![Version](https://img.shields.io/badge/version-0.4.1-green.svg)
+![Version](https://img.shields.io/badge/version-0.1.4-green.svg)
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 
 QCLang is a high-level programming language designed to bridge the gap between **classical systems programming** and **quantum circuit execution**.  
@@ -12,10 +12,10 @@ It features a Rust-inspired syntax, a strict **affine type system** for quantum 
 
 ```
 
-/_/\
-( o.o )    Q U A N T U M   C A T
+      /\_/\ 
+     ( o.o )      Q U A N T U M   C A T
+      > ^ <    Schrödinger’s Companion
 
-> ^ <     Schrödinger’s Companion
 
 ````
 
