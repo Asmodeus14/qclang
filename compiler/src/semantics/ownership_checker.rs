@@ -1,57 +1,70 @@
-use crate::ast::{Program, Function, Stmt, Expr, Type};
+// src/semantics/ownership_checker.rs - FIXED
+use crate::ast::*;
+use crate::semantics::symbols::TypeRegistry;
+use crate::semantics::errors::SemanticError;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
+pub struct OwnershipChecker {
+    source: String,
+    qubit_states: HashMap<String, QubitState>,
+    cbit_states: HashMap<String, CbitState>,
+    current_scope: Vec<HashMap<String, (Type, bool)>>,
+    errors: Vec<SemanticError>,
+    type_registry: TypeRegistry,
+    struct_defs: HashMap<String, StructDef>,
+    used_qubits: HashSet<String>,
+    measured_qubits: HashSet<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum QubitState {
-    Uninitialized,
-    Alive,
+    Available,
     Measured,
+    Transformed,
     Consumed,
 }
 
-#[derive(Debug)]
-pub struct OwnershipChecker {
-    errors: Vec<String>,
-    warnings: Vec<String>,
-    qubit_env: HashMap<String, QubitState>,
-    quantum_functions: HashSet<String>,
-    current_function: String,
-    current_return_type: Type, // Track the current function's return type
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CbitState {
+    Uninitialized,
+    Measured,
+    Used,
 }
 
 impl OwnershipChecker {
-    pub fn new() -> Self {
+    pub fn new(source: &str) -> Self {
         Self {
+            source: source.to_string(),
+            qubit_states: HashMap::new(),
+            cbit_states: HashMap::new(),
+            current_scope: vec![HashMap::new()],
             errors: Vec::new(),
-            warnings: Vec::new(),
-            qubit_env: HashMap::new(),
-            quantum_functions: HashSet::new(),
-            current_function: String::new(),
-            current_return_type: Type::Unit,
+            type_registry: TypeRegistry::new(),
+            struct_defs: HashMap::new(),
+            used_qubits: HashSet::new(),
+            measured_qubits: HashSet::new(),
         }
     }
-
-    pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<String>> {
-        // First pass: collect quantum function signatures
-        for func in &program.functions {
-            if self.is_quantum_function(func) {
-                self.quantum_functions.insert(func.name.clone());
-            }
+    
+    pub fn set_type_registry(&mut self, registry: TypeRegistry) {
+        self.type_registry = registry;
+    }
+    
+    pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<SemanticError>> {
+        // Collect type definitions first from Program
+        for type_alias in &program.type_aliases {
+            self.type_registry.add_type_alias(type_alias.name.clone(), type_alias.target.clone());
         }
         
-        // Second pass: check each function
-        for func in &program.functions {
-            self.current_function = func.name.clone();
-            self.current_return_type = func.return_type.clone();
-            self.qubit_env.clear();
-            
-            // Check each statement
-            for stmt in &func.body {
-                self.check_statement(stmt)?;
-            }
-            
-            // At function end, enforce quantum resource cleanup
-            self.check_function_exit(func)?;
+        for struct_def in &program.struct_defs {
+            self.type_registry.add_struct_def(struct_def.clone());
+            self.struct_defs.insert(struct_def.name.clone(), struct_def.clone());
+        }
+        
+        // Check each function
+        for function in &program.functions {
+            self.check_function(function);
         }
         
         if self.errors.is_empty() {
@@ -61,273 +74,235 @@ impl OwnershipChecker {
         }
     }
     
-    fn is_quantum_function(&self, func: &Function) -> bool {
-        // A function is quantum if:
-        // 1. It returns a quantum type (qubit, qreg)
-        // 2. It takes quantum parameters
-        match &func.return_type {
-            Type::Qubit | Type::Qreg(_, _) => true,
-            _ => {
-                // Check parameters
-                for param in &func.params {
-                    if matches!(param.ty, Type::Qubit | Type::Qreg(_, _)) {
-                        return true;
-                    }
-                }
-                false
-            }
-        }
-    }
-    
-    fn check_statement(&mut self, stmt: &Stmt) -> Result<(), Vec<String>> {
-        match stmt {
-            Stmt::Let(name, ty, expr) => {
-                match ty {
-                    Type::Qubit => {
-                        // Qubit declaration - must be initialized
-                        self.qubit_env.insert(name.clone(), QubitState::Uninitialized);
-                        self.check_expr(expr)?;
-                        
-                        // After initialization, mark as alive
-                        if self.is_qubit_initializer(expr) {
-                            self.qubit_env.insert(name.clone(), QubitState::Alive);
-                        }
-                    }
-                    Type::Cbit => {
-                        // Classical bit from measurement
-                        self.check_expr(expr)?;
-                        
-                        // If this is a measurement, consume the qubit
-                        if let Expr::Measure(qubit_expr) = expr {
-                            if let Expr::Variable(qubit_name) = &**qubit_expr {
-                                self.consume_qubit(qubit_name)?;
-                            }
-                        }
-                    }
-                    _ => {
-                        // Classical variables - no quantum constraints
-                        self.check_expr(expr)?;
-                    }
-                }
-            }
-            
-            Stmt::Assign(var, expr) => {
-                // Special quantum assignment rules
-                if let Some(state) = self.qubit_env.get(var) {
-                    match state {
-                        QubitState::Measured | QubitState::Consumed => {
-                            self.errors.push(format!(
-                                "Cannot assign to qubit '{}' after it has been {}",
-                                var,
-                                match state {
-                                    QubitState::Measured => "measured",
-                                    QubitState::Consumed => "consumed",
-                                    _ => unreachable!()
-                                }
-                            ));
-                        }
-                        QubitState::Alive => {
-                            // Gate application consumes and produces
-                            if let Expr::GateApply(_, args) = expr {
-                                // Check all argument qubits are alive
-                                for arg in args {
-                                    if let Expr::Variable(arg_name) = arg {
-                                        self.use_qubit(arg_name)?;
-                                    }
-                                }
-                                // The LHS qubit is now re-alive
-                                self.qubit_env.insert(var.clone(), QubitState::Alive);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                self.check_expr(expr)?;
-            }
-            
-            Stmt::Expr(expr) => {
-                // Expression statement (like bare measurement)
-                self.check_expr(expr)?;
-                
-                // If it's a measurement without assignment, qubit is still consumed
-                if let Expr::Measure(qubit_expr) = expr {
-                    if let Expr::Variable(qubit_name) = &**qubit_expr {
-                        self.consume_qubit(qubit_name)?;
-                    }
-                }
-            }
-            
-            Stmt::Return(expr) => {
-                if let Some(expr) = expr {
-                    self.check_expr(expr)?;
-                    
-                    // If returning a qubit, mark it as passed out
-                    if self.is_qubit_expression(expr) {
-                        if let Expr::Variable(qubit_name) = expr {
-                            self.consume_qubit(qubit_name)?;
-                        }
-                    }
-                }
-                
-                // Check for unconsumed qubits when returning
-                let unconsumed: Vec<_> = self.qubit_env.iter()
-                    .filter(|(_, state)| **state == QubitState::Alive)
-                    .map(|(name, _)| name.clone())
-                    .collect();
-                    
-                if !unconsumed.is_empty() && self.current_return_type == Type::Unit {
-                    self.errors.push(format!(
-                        "Function '{}' returns but has unconsumed qubits: {:?}. \
-                         All qubits must be measured or explicitly passed.",
-                        self.current_function, unconsumed
+    fn check_function(&mut self, function: &Function) {
+        self.current_scope.push(HashMap::new());
+        
+        // Register parameters
+        for param in &function.params {
+            let resolved_ty = match self.type_registry.resolve_type(&param.ty) {
+                Ok(ty) => ty,
+                Err(e) => {
+                    self.errors.push(SemanticError::new(
+                        &param.span,
+                        &format!("Invalid parameter type: {}", e),
+                        Some("Parameter type must be valid"),
                     ));
+                    continue;
                 }
-            }
+            };
             
-            _ => {} // Other statements not implemented yet
+            self.current_scope.last_mut().unwrap().insert(
+                param.name.clone(),
+                (resolved_ty.clone(), param.mutable)
+            );
         }
         
-        Ok(())
+        // Check function body
+        for stmt in &function.body {
+            self.check_statement(stmt);
+        }
+        
+        self.current_scope.pop();
     }
     
-    fn check_expr(&mut self, expr: &Expr) -> Result<(), Vec<String>> {
+    fn check_statement(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Let(name, ty, expr, mutable, span) => {
+                let resolved_ty = match self.type_registry.resolve_type(ty) {
+                    Ok(ty) => ty,
+                    Err(e) => {
+                        self.errors.push(SemanticError::new(
+                            span,
+                            &format!("Invalid type in let statement: {}", e),
+                            Some("Type must be valid"),
+                        ));
+                        return;
+                    }
+                };
+                
+                self.current_scope.last_mut().unwrap().insert(
+                    name.clone(),
+                    (resolved_ty.clone(), *mutable)
+                );
+                
+                // Check quantum type mutability
+                if *mutable {
+                    if let Ok(true) = self.type_registry.is_quantum_type(&resolved_ty) {
+                        self.errors.push(SemanticError::new(
+                            span,
+                            "Quantum types cannot be mutable",
+                            Some("Remove 'mut' keyword from quantum variable"),
+                        ));
+                    }
+                }
+                
+                // Check expression
+                self.check_expression(expr);
+            }
+            
+            Stmt::Assign(name, expr, span) => {
+                // Check variable exists
+                let (ty, mutable) = match self.lookup_variable(name) {
+                    Some(info) => info,
+                    None => {
+                        self.errors.push(SemanticError::new(
+                            span,
+                            &format!("Variable '{}' not found", name),
+                            Some("Variable must be declared before assignment"),
+                        ));
+                        return;
+                    }
+                };
+                
+                if !mutable {
+                    self.errors.push(SemanticError::new(
+                        span,
+                        &format!("Cannot assign to immutable variable '{}'", name),
+                        Some("Declare variable with 'mut' to make it mutable"),
+                    ));
+                }
+                
+                // Check quantum type reassignment
+                if let Ok(true) = self.type_registry.is_quantum_type(&ty) {
+                    self.errors.push(SemanticError::new(
+                        span,
+                        &format!("Cannot reassign quantum variable '{}'", name),
+                        Some("Quantum variables follow affine typing and cannot be reassigned"),
+                    ));
+                }
+                
+                // Check expression
+                self.check_expression(expr);
+            }
+            
+            Stmt::Expr(expr, span) => {
+                self.check_expression(expr);
+            }
+            
+            Stmt::Return(expr, span) => {
+                if let Some(expr) = expr {
+                    self.check_expression(expr);
+                }
+            }
+            
+            Stmt::Block(stmts, _) => {
+                self.current_scope.push(HashMap::new());
+                for stmt in stmts {
+                    self.check_statement(stmt);
+                }
+                self.current_scope.pop();
+            }
+            
+            _ => {} // Other statements handled by semantic analyzer
+        }
+    }
+    
+    fn check_expression(&mut self, expr: &Expr) {
         match expr {
-            Expr::Variable(name) => {
-                if let Some(state) = self.qubit_env.get(name) {
-                    match state {
-                        QubitState::Uninitialized => {
-                            self.errors.push(format!(
-                                "Use of uninitialized qubit '{}'",
-                                name
-                            ));
+            Expr::Variable(name, span) => {
+                if let Some((ty, _)) = self.lookup_variable(name) {
+                    // Check quantum resource usage
+                    if let Ok(true) = self.type_registry.is_quantum_type(&ty) {
+                        if let Some(state) = self.qubit_states.get(name) {
+                            match state {
+                                QubitState::Measured => {
+                                    self.errors.push(SemanticError::new(
+                                        span,
+                                        &format!("Qubit '{}' used after measurement", name),
+                                        Some("Quantum resources are affine and cannot be used after measurement"),
+                                    ));
+                                }
+                                QubitState::Consumed => {
+                                    self.errors.push(SemanticError::new(
+                                        span,
+                                        &format!("Qubit '{}' already consumed", name),
+                                        Some("Quantum resources can only be used once"),
+                                    ));
+                                }
+                                _ => {}
+                            }
                         }
-                        QubitState::Measured | QubitState::Consumed => {
-                            self.errors.push(format!(
-                                "Use of {} qubit '{}'",
-                                match state {
-                                    QubitState::Measured => "measured",
-                                    QubitState::Consumed => "consumed",
-                                    _ => unreachable!()
-                                },
-                                name
-                            ));
-                        }
-                        _ => {} // Alive qubits can be used
                     }
                 }
             }
             
-            Expr::GateApply(gate_name, args) => {
+            Expr::Measure(qubit_expr, span) => {
+                self.check_expression(qubit_expr);
+                
+                // Mark measured qubits
+                if let Expr::Variable(name, _) = &**qubit_expr {
+                    self.qubit_states.insert(name.clone(), QubitState::Measured);
+                } else if let Expr::MemberAccess(base, field, _) = &**qubit_expr {
+                    // Handle struct member measurement
+                    if let Expr::Variable(struct_name, _) = &**base {
+                        let full_name = format!("{}.{}", struct_name, field);
+                        self.qubit_states.insert(full_name, QubitState::Measured);
+                    }
+                }
+            }
+            
+            Expr::GateApply(_gate, args, span) => {
                 for arg in args {
-                    self.check_expr(arg)?;
+                    self.check_expression(arg);
                     
-                    // Check gate-specific constraints
-                    if gate_name == "CNOT" && args.len() == 2 {
-                        // CNOT control and target must be different qubits
-                        if let (Expr::Variable(a), Expr::Variable(b)) = (&args[0], &args[1]) {
-                            if a == b {
-                                self.errors.push(format!(
-                                    "CNOT gate cannot have same qubit as control and target: '{}'",
-                                    a
+                    // Check quantum arguments are not measured
+                    if let Expr::Variable(name, _) = arg {
+                        if let Some(state) = self.qubit_states.get(name) {
+                            if *state == QubitState::Measured {
+                                self.errors.push(SemanticError::new(
+                                    span,
+                                    &format!("Qubit '{}' used in gate after measurement", name),
+                                    Some("Quantum resources cannot be used in gates after measurement"),
                                 ));
                             }
                         }
-                    }
-                }
-            }
-            
-            Expr::Measure(qubit_expr) => {
-                self.check_expr(qubit_expr)?;
-            }
-            
-            Expr::Call(func_name, args) => {
-                // Check if this is a quantum function call
-                if self.quantum_functions.contains(func_name) {
-                    // Quantum function consumes its quantum arguments
-                    for arg in args {
-                        if let Expr::Variable(arg_name) = arg {
-                            if self.qubit_env.contains_key(arg_name) {
-                                self.consume_qubit(arg_name)?;
+                    } else if let Expr::MemberAccess(base, field, _) = arg {
+                        // Check struct member
+                        if let Expr::Variable(struct_name, _) = &**base {
+                            let full_name = format!("{}.{}", struct_name, field);
+                            if let Some(state) = self.qubit_states.get(&full_name) {
+                                if *state == QubitState::Measured {
+                                    self.errors.push(SemanticError::new(
+                                        span,
+                                        &format!("Struct member '{}.{}' used in gate after measurement", struct_name, field),
+                                        Some("Quantum resources cannot be used in gates after measurement"),
+                                    ));
+                                }
                             }
                         }
-                        self.check_expr(arg)?;
-                    }
-                } else {
-                    // Classical function - no special quantum rules
-                    for arg in args {
-                        self.check_expr(arg)?;
                     }
                 }
             }
             
-            _ => {} // Literals don't affect quantum state
-        }
-        
-        Ok(())
-    }
-    
-fn check_function_exit(&mut self, func: &Function) -> Result<(), Vec<String>> {
-    // Check for unconsumed qubits at function exit
-    let unconsumed: Vec<_> = self.qubit_env.iter()
-        .filter(|(_, state)| **state == QubitState::Alive)
-        .map(|(name, _)| name.clone())
-        .collect();
-    
-    if !unconsumed.is_empty() {
-        // Always error if there are unconsumed qubits, regardless of return type
-        // The only exception would be if the function returns qubits, 
-        // but we handle that in the Return statement
-        self.errors.push(format!(
-            "Function '{}' ends with unconsumed qubits: {:?}. \
-             All qubits must be measured, returned, or passed to another function.",
-            func.name, unconsumed
-        ));
-    }
-    
-    Ok(())
-}
-    
-    fn use_qubit(&mut self, name: &str) -> Result<(), Vec<String>> {
-        match self.qubit_env.get(name) {
-            Some(QubitState::Alive) => Ok(()),
-            Some(QubitState::Uninitialized) => {
-                self.errors.push(format!("Use of uninitialized qubit '{}'", name));
-                Err(self.errors.clone())
+            Expr::BinaryOp(left, _, right, _) => {
+                self.check_expression(left);
+                self.check_expression(right);
             }
-            Some(QubitState::Measured) => {
-                self.errors.push(format!("Use of measured qubit '{}'", name));
-                Err(self.errors.clone())
+            
+            Expr::UnaryOp(_, operand, _) => {
+                self.check_expression(operand);
             }
-            Some(QubitState::Consumed) => {
-                self.errors.push(format!("Use of consumed qubit '{}'", name));
-                Err(self.errors.clone())
+            
+            Expr::Call(_, args, _) => {
+                for arg in args {
+                    self.check_expression(arg);
+                }
             }
-            None => {
-                // Not a qubit (classical variable) - that's OK
-                Ok(())
-            }
+            
+            _ => {} // Other expressions don't need special checking
         }
     }
     
-    fn consume_qubit(&mut self, name: &str) -> Result<(), Vec<String>> {
-        self.use_qubit(name)?;
-        self.qubit_env.insert(name.to_string(), QubitState::Consumed);
-        Ok(())
+    fn lookup_variable(&self, name: &str) -> Option<(Type, bool)> {
+        for scope in self.current_scope.iter().rev() {
+            if let Some((ty, mutable)) = scope.get(name) {
+                return Some((ty.clone(), *mutable));
+            }
+        }
+        None
     }
     
-    fn is_qubit_initializer(&self, expr: &Expr) -> bool {
-        matches!(expr, Expr::LiteralQubit(_))
-    }
-    
-    fn is_qubit_expression(&self, expr: &Expr) -> bool {
-        matches!(expr, Expr::Variable(name) if self.qubit_env.contains_key(name))
-    }
-    
-    pub fn get_errors(&self) -> &[String] {
-        &self.errors
-    }
-    
-    pub fn get_warnings(&self) -> &[String] {
-        &self.warnings
+    pub fn format_error(&self, error: &SemanticError) -> String {
+        error.format_with_source(&self.source)
     }
 }

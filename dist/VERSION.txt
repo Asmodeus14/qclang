@@ -1,2 +1,0 @@
-QCLang v0.2.0
-Built: Wed Jan 21 13:23:42 UTC 2026

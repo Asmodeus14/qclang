@@ -1,2 +1,2 @@
-# Rust build output
-compiler/target/
+# Rust build outputs
+/compiler/target/*rs

@@ -1,3 +1,4 @@
+// error.rs - COMPLETE
 use thiserror::Error;
 
 #[derive(Error, Debug)]
