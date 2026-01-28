@@ -1,10 +1,10 @@
 [package]
-name = "qclang-compiler"
+name = "qclang_compiler"
 version = "0.4.1"
 edition = "2021"
 description = "A quantum systems programming language compiler"
 authors = ["QCLang Team"]
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 repository = "https://github.com/Asmodeus14/qclang"
 readme = "README.md"
 keywords = ["quantum", "compiler", "programming-language", "qasm"]
