@@ -12,11 +12,11 @@ categories = ["science", "development-tools"]
 
 [[bin]]
 name = "qclang"
-path = "src/bin/qclang.rs"
+path = "compiler/src/bin/qclang.rs"
 
 [[bin]]
 name = "qclang-test"
-path = "src/main.rs"
+path = "compiler/src/main.rs"
 
 [dependencies]
 logos = "0.13"
