@@ -1,45 +1,87 @@
-# 1. WHEN does it run?
+name: Release Static Binaries
+
 on:
   push:
-    tags:
-      - 'v*'  # Runs when you push ANY tag starting with 'v'
+    tags: ['v*.*.*']
 
-# 2. WHAT jobs to run?
+permissions:
+  contents: write  # Required for creating releases
+
 jobs:
-  build:  # First job: Build binaries
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]  # Build on 2 OSes
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            binary_name: qclang
-            asset_name: qclang-linux-static
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            binary_name: qclang.exe
-            asset_name: qclang-windows-static
-
-    runs-on: ${{ matrix.os }}  # Runs on Ubuntu AND Windows machines
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
     
-    steps:  # What to do on each machine
-    - uses: actions/checkout@v4  # Step 1: Get your code
-    - name: Setup Rust           # Step 2: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        target: ${{ matrix.target }}
-    
-    - name: Build Static Binary  # Step 3: Compile
+    - name: Install Rust
       run: |
-        if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-          RUSTFLAGS='-C target-feature=+crt-static' cargo build --release --target ${{ matrix.target }}
-        else
-          cargo build --release --target ${{ matrix.target }}
-        fi
+        rustup target add x86_64-unknown-linux-gnu
+        rustup update stable
     
-    - name: Upload Artifact     # Step 4: Save the binary
-      uses: actions/upload-artifact@v3
+    - name: Build Linux Static
+      run: |
+        RUSTFLAGS='-C target-feature=+crt-static' cargo build --release --target x86_64-unknown-linux-gnu
+    
+    - name: Upload Linux Binary
+      uses: actions/upload-artifact@v4  # ✅ UPDATED TO v4
       with:
-        name: ${{ matrix.asset_name }}
-        path: target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+        name: qclang-linux
+        path: target/x86_64-unknown-linux-gnu/release/qclang
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      run: |
+        rustup target add x86_64-pc-windows-msvc
+        rustup update stable
+    
+    - name: Build Windows
+      run: cargo build --release --target x86_64-pc-windows-msvc
+    
+    - name: Upload Windows Binary
+      uses: actions/upload-artifact@v4  # ✅ UPDATED TO v4
+      with:
+        name: qclang-windows
+        path: target/x86_64-pc-windows-msvc/release/qclang.exe
+
+  release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download Linux Artifact
+      uses: actions/download-artifact@v4  # ✅ UPDATED TO v4
+      with:
+        name: qclang-linux
+        
+    - name: Download Windows Artifact
+      uses: actions/download-artifact@v4  # ✅ UPDATED TO v4
+      with:
+        name: qclang-windows
+        
+    - name: Create Release Packages
+      run: |
+        # Create release directory
+        mkdir -p release
+        
+        # Package Linux binary
+        mv qclang release/qclang-linux-x86_64
+        tar -czf release/qclang-linux-x86_64.tar.gz -C release qclang-linux-x86_64
+        
+        # Package Windows binary  
+        mv qclang.exe release/qclang-windows-x86_64.exe
+        zip release/qclang-windows-x86_64.zip release/qclang-windows-x86_64.exe
+        
+        # Create checksums
+        cd release
+        sha256sum * > sha256sums.txt
+        ls -lh
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release/*
+        generate_release_notes: true
