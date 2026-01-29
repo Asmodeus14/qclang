@@ -1,3 +1,4 @@
+<img width="849" height="383" alt="image" src="https://github.com/user-attachments/assets/fdf3d4da-0f6c-4186-9a69-a7a67f8a8ad0" />
 
 # ⚛️ QCLang
 
