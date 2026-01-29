@@ -1,4 +1,4 @@
-// src/main.rs - TEST SUITE FOR PHASE 1.5
+// src/main.rs - TEST SUITE FOR PHASE 1.5 (FIXED)
 mod lexer;
 mod ast;
 mod parser;
@@ -61,7 +61,8 @@ fn test_qir_generation(source: &str, name: &str) {
     
     // Optimize QIR
     println!("\n=== QIR OPTIMIZATION ===");
-    let optimizer = QirOptimizer::new();
+    // FIXED: Passed 'true' to enable optimizations
+    let optimizer = QirOptimizer::new(true); 
     let mut optimized_module = module.clone();
     optimizer.optimize_module(&mut optimized_module);
     

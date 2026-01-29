@@ -1,9 +1,9 @@
-// src/lib.rs - UPDATED FOR PHASE 1.5 (FIXED)
+// src/lib.rs - UPDATED FOR PHASE 1.5 WITH OPTIMIZATION FLAGS
 pub mod lexer;
 pub mod ast;
 pub mod parser;
-pub mod ir;      // OLD IR (will be deprecated)
-pub mod qir;     // NEW Quantum Intermediate Representation
+pub mod ir;      
+pub mod qir;     
 pub mod codegen;
 pub mod semantics;
 pub mod error;
@@ -14,16 +14,16 @@ use qir::builder::QirBuilder;
 use qir::optimizer::QirOptimizer;
 use qir::analysis::QirAnalyzer;
 use semantics::SemanticAnalyzer;
-use codegen::QASMGenerator;  // Import the new QASM generator
+use codegen::QASMGenerator;
 
-pub const VERSION: &str = "0.6.0";  // Bumped version for Phase 1.5
+pub const VERSION: &str = "0.6.0";
 
 pub fn build_timestamp() -> &'static str {
     "2024-01-27 10:00:00"
 }
 
 pub fn git_commit_hash() -> &'static str {
-    "phase1.5-qir-implementation"
+    "phase1.5-optimizer-integration"
 }
 
 pub struct Compiler;
@@ -39,7 +39,10 @@ impl Compiler {
     
     pub fn capabilities() -> Vec<&'static str> {
         vec![
-            "Phase 1.5: Quantum Intermediate Representation (QIR)",
+            "Phase 1.5: QIR Optimizations",
+            "• Dead Qubit Elimination",
+            "• Gate Cancellation",
+            "• QIR-to-QASM Generation",
             "• New QIR module with SSA form and linear qubit tracking",
             "• Type-safe intermediate representation",
             "• Basic optimization passes: constant folding, dead qubit elimination",
@@ -77,90 +80,81 @@ impl Compiler {
         ]
     }
     
-// In lib.rs - Update the compile_with_stats function
-pub fn compile_with_stats(source: &str) -> Result<(String, CompileStats), Vec<String>> {
-    // LEXING
-    let tokens = tokenize(source);
-    
-    // PARSING
-    let mut parser = Parser::new(tokens.into_iter(), source.to_string());
-    let program = parser.parse_program();
-    
-    if !parser.errors.is_empty() {
-        let errors: Vec<String> = parser.errors
-            .iter()
-            .map(|e| e.to_string())
-            .collect();
-        return Err(errors);
-    }
-    
-    // SEMANTIC ANALYSIS
-    let mut semantic_analyzer = SemanticAnalyzer::new();
-    
-    match semantic_analyzer.analyze_program(&program) {
-        Ok(_) => {
-            // Report warnings
-            for warning in semantic_analyzer.get_warnings() {
-                eprintln!("Warning: {}", warning);
-            }
-        }
-        Err(errors) => {
-            let error_strings: Vec<String> = errors
+    pub fn compile_with_stats(source: &str, optimize: bool) -> Result<(String, CompileStats), Vec<String>> {
+        // LEXING
+        let tokens = tokenize(source);
+        
+        // PARSING
+        let mut parser = Parser::new(tokens.into_iter(), source.to_string());
+        let program = parser.parse_program();
+        
+        if !parser.errors.is_empty() {
+            let errors: Vec<String> = parser.errors
                 .iter()
                 .map(|e| e.to_string())
                 .collect();
-            return Err(error_strings);
+            return Err(errors);
         }
-    }
-    
-    // PHASE 1.5: QIR GENERATION
-    println!("Phase 1.5: Generating Quantum Intermediate Representation...");
-    let mut qir_builder = QirBuilder::new();
-    let mut qir_module = qir_builder.build_from_program(&program);
-    
-    // QIR OPTIMIZATION
-    println!("  Running QIR optimizations...");
-    let optimizer = QirOptimizer::new();
-    optimizer.optimize_module(&mut qir_module);
-    
-    // QIR ANALYSIS
-    println!("  Analyzing QIR...");
-    let mut analyzer = QirAnalyzer::new();
-    if !analyzer.analyze_module(&qir_module) {
-        for error in analyzer.get_errors() {
-            eprintln!("QIR Error: {}", error);
+        
+        // SEMANTIC ANALYSIS
+        let mut semantic_analyzer = SemanticAnalyzer::new();
+        match semantic_analyzer.analyze_program(&program) {
+            Ok(_) => {
+                for warning in semantic_analyzer.get_warnings() {
+                    eprintln!("Warning: {}", warning);
+                }
+            }
+            Err(errors) => {
+                let error_strings: Vec<String> = errors
+                    .iter()
+                    .map(|e| e.to_string())
+                    .collect();
+                return Err(error_strings);
+            }
         }
-        return Err(analyzer.get_errors().iter().map(|s| s.clone()).collect());
+        
+        // QIR GENERATION
+        // println!("Phase 1.5: Generating QIR..."); // Silent by default for cleanliness
+        let mut qir_builder = QirBuilder::new();
+        let mut qir_module = qir_builder.build_from_program(&program);
+        
+        // QIR OPTIMIZATION
+        if optimize {
+            // println!("  Running QIR optimizations...");
+            let optimizer = QirOptimizer::new(true);
+            optimizer.optimize_module(&mut qir_module);
+        }
+        
+        // QIR ANALYSIS
+        let mut analyzer = QirAnalyzer::new();
+        if !analyzer.analyze_module(&qir_module) {
+            return Err(analyzer.get_errors().iter().map(|s| s.clone()).collect());
+        }
+        
+        // Generate QASM
+        let mut qasm_generator = QASMGenerator::new();
+        let qasm_code = qasm_generator.generate(&qir_module);
+        
+        // Stats
+        let stats = CompileStats {
+            qubits: qasm_generator.qubit_count(),
+            cbits: qasm_generator.cbit_count(),
+            gates: qasm_generator.gate_count(),
+            measurements: qasm_generator.measurement_count(),
+        };
+        
+        Ok((qasm_code, stats))
     }
-    
-    // Generate QASM
-    println!("  Generating QASM from QIR...");
-    let mut qasm_generator = QASMGenerator::new();
-    let qasm_code = qasm_generator.generate(&qir_module);
-    
-    // Get compilation statistics
-    let stats = CompileStats {
-        qubits: qasm_generator.qubit_count(),
-        cbits: qasm_generator.cbit_count(),
-        gates: qasm_generator.gate_count(),
-        measurements: qasm_generator.measurement_count(),
-    };
-    
-    Ok((qasm_code, stats))
-}
     
     pub fn compile(source: &str) -> Result<String, Vec<String>> {
-        match Self::compile_with_stats(source) {
-            Ok((qasm, _)) => Ok(qasm),
-            Err(errors) => Err(errors),
-        }
+        // Default to optimized for general use
+        Self::compile_with_stats(source, true).map(|(s, _)| s)
     }
     
     pub fn compile_with_diagnostics(source: &str) -> (Result<String, Vec<String>>, CompileStats) {
-        match Self::compile_with_stats(source) {
-            Ok((qasm, stats)) => (Ok(qasm), stats),
-            Err(errors) => (Err(errors), CompileStats::default()),
-        }
+        Self::compile_with_stats(source, true)
+            .map(|(q, s)| (Ok(q), s))
+            .unwrap_or_else(|e| (Err(e), CompileStats::default()))
     }
 }
 
@@ -174,39 +168,14 @@ pub struct CompileStats {
 
 impl CompileStats {
     pub fn new() -> Self {
-        Self {
-            qubits: 0,
-            cbits: 0,
-            gates: 0,
-            measurements: 0,
-        }
+        Self { qubits: 0, cbits: 0, gates: 0, measurements: 0 }
     }
     
     pub fn total_operations(&self) -> usize {
         self.gates + self.measurements
     }
-    
-    pub fn is_empty(&self) -> bool {
-        self.qubits == 0 && self.cbits == 0 && self.gates == 0 && self.measurements == 0
-    }
 }
 
 impl Default for CompileStats {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Display for CompileStats {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, 
-            "Qubits: {}, CBits: {}, Gates: {}, Measurements: {}, Total Operations: {}",
-            self.qubits,
-            self.cbits,
-            self.gates,
-            self.measurements,
-            self.total_operations()
-        )
-    }
+    fn default() -> Self { Self::new() }
 }
