@@ -1,7 +1,7 @@
 [package]
 name = "qclang_compiler"
 version = "0.2.1"
-edition = "2026"
+edition = "2021"
 description = "A quantum systems programming language compiler"
 authors = ["QCLang Team"]
 license = "Apache-2.0"
