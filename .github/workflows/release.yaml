@@ -17,15 +17,13 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            # Linux: rename binary to 'qclang' then tar
-            # We are inside 'compiler/' directory when this runs
-            rename_cmd: mv target/release/qclang qclang && tar -czf qclang-linux-x86_64.tar.gz qclang
+            # FIX: Path includes the target triple folder
+            rename_cmd: mv target/x86_64-unknown-linux-gnu/release/qclang qclang && tar -czf qclang-linux-x86_64.tar.gz qclang
             asset_name: qclang-linux-x86_64.tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            # Windows: use 'cp' (bash compatible), rename to 'qclang.exe' then zip
-            # We are inside 'compiler/' directory when this runs
-            rename_cmd: cp target/release/qclang.exe qclang.exe && 7z a qclang-windows-x86_64.zip qclang.exe
+            # FIX: Path includes the target triple folder
+            rename_cmd: cp target/x86_64-pc-windows-msvc/release/qclang.exe qclang.exe && 7z a qclang-windows-x86_64.zip qclang.exe
             asset_name: qclang-windows-x86_64.zip
 
     steps:
@@ -38,7 +36,6 @@ jobs:
           target: ${{ matrix.target }}
           override: true
 
-      # Linux dependencies for self_update (OpenSSL, pkg-config)
       - name: Install Linux Dependencies
         if: runner.os == 'Linux'
         run: |
@@ -46,14 +43,14 @@ jobs:
           sudo apt-get install -y pkg-config libssl-dev
 
       - name: Build
-        working-directory: compiler   # <--- FIX: Run cargo inside compiler folder
+        working-directory: compiler
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package Binary
         shell: bash
         run: |
           cd compiler
-          # Run the OS-specific rename and archive command
+          # Execute the command defined in the matrix
           ${{ matrix.rename_cmd }}
 
       - name: Upload Artifact
