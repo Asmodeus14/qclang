@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+# FIX: Grant permission to create releases
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -17,12 +21,10 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            # FIX: Path includes the target triple folder
             rename_cmd: mv target/x86_64-unknown-linux-gnu/release/qclang qclang && tar -czf qclang-linux-x86_64.tar.gz qclang
             asset_name: qclang-linux-x86_64.tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            # FIX: Path includes the target triple folder
             rename_cmd: cp target/x86_64-pc-windows-msvc/release/qclang.exe qclang.exe && 7z a qclang-windows-x86_64.zip qclang.exe
             asset_name: qclang-windows-x86_64.zip
 
@@ -50,7 +52,6 @@ jobs:
         shell: bash
         run: |
           cd compiler
-          # Execute the command defined in the matrix
           ${{ matrix.rename_cmd }}
 
       - name: Upload Artifact
