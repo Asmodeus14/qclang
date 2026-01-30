@@ -1,13 +1,13 @@
 // src/qir/builder.rs - FIXED LET STATEMENT HANDLER
 use crate::ast::{Program, Function, Stmt, Expr, Type, BinaryOp, UnaryOp, Gate as AstGate};
-use crate::semantics::{SemanticAnalyzer, TypeRegistry};
+// Removed: use crate::semantics::{SemanticAnalyzer, TypeRegistry}; -- We trust the caller!
 use super::*;
 use std::collections::HashMap;
 
 pub struct QirBuilder {
     module: QirModule,
     current_function: Option<String>,
-    type_registry: TypeRegistry,
+    // type_registry: TypeRegistry, // Removed dependency on TypeRegistry for now to simplify
     symbol_table: HashMap<String, (QirType, QirValue)>,
     loop_stack: Vec<BlockId>,
     qubit_counter: usize,
@@ -20,7 +20,7 @@ impl QirBuilder {
         Self {
             module: QirModule::new("main"),
             current_function: None,
-            type_registry: TypeRegistry::new(),
+            // type_registry: TypeRegistry::new(),
             symbol_table: HashMap::new(),
             loop_stack: Vec::new(),
             qubit_counter: 0,
@@ -30,16 +30,8 @@ impl QirBuilder {
     }
     
     pub fn build_from_program(&mut self, program: &Program) -> QirModule {
-        let mut analyzer = SemanticAnalyzer::new();
-        if let Err(errors) = analyzer.analyze_program(program) {
-            eprintln!("Semantic errors during QIR building:");
-            for error in errors {
-                eprintln!("  {}", error);
-            }
-            return self.module.clone();
-        }
-        
-        self.type_registry = analyzer.get_type_registry().clone();
+        // FIX: Removed redundant SemanticAnalyzer check. 
+        // We assume lib.rs has already validated the AST.
         
         for func in &program.functions {
             self.build_function(func);
@@ -70,6 +62,12 @@ impl QirBuilder {
         
         for stmt in &ast_func.body {
             self.build_statement(stmt, &mut qir_func);
+        }
+        
+        // Ensure the function ends with a return if not present (implicit void return)
+        let current_blk = qir_func.get_current_block_mut();
+        if !current_blk.is_terminated() {
+            current_blk.add_op(QirOp::Return { value: None });
         }
         
         self.module.add_function(qir_func);
@@ -115,7 +113,6 @@ impl QirBuilder {
     fn build_let_stmt(&mut self, name: &str, ty: &Type, expr: &Expr, _mutable: bool, qir_func: &mut QirFunction) {
         match ty {
             Type::Qreg(size) => {
-                // Initialize Quantum Register
                 let mut qubit_values = Vec::new();
                 let bit_string = if let Expr::LiteralQubit(bit_str, _) = expr {
                     Some(bit_str)
@@ -152,7 +149,6 @@ impl QirBuilder {
                 self.symbol_table.insert(name.to_string(), (qir_type, QirValue::Array(qubit_values)));
             }
             Type::Array(elem_type, size) => {
-                // Handle Arrays (e.g. cbit[5], int[10])
                 if let Type::Cbit = **elem_type {
                     let mut cbit_values = Vec::new();
                     
@@ -174,15 +170,12 @@ impl QirBuilder {
                     let qir_type = self.convert_type(ty);
                     self.symbol_table.insert(name.to_string(), (qir_type, QirValue::Array(cbit_values)));
                 } else {
-                    // Other arrays
                     let value = self.build_expr_value(expr, qir_func);
                     let qir_type = self.convert_type(ty);
                     self.symbol_table.insert(name.to_string(), (qir_type, value));
                 }
             }
             _ => {
-                // Handle Standard Variables (int, float, qubit, cbit)
-                // This includes "cbit result = measure(q);"
                 let value = self.build_expr_value(expr, qir_func);
                 let qir_type = self.convert_type(ty);
                 self.symbol_table.insert(name.to_string(), (qir_type, value));
@@ -385,7 +378,6 @@ impl QirBuilder {
         for arg in args {
             let value = self.build_expr_value(arg, qir_func);
             let actual_value = if matches!(value, QirValue::Null) {
-                // Keep manual fallback for safety, though build_index_expr should handle it
                 if let Expr::Index(array_expr, index_expr, _) = arg {
                      self.build_index_expr(array_expr, index_expr, qir_func)
                 } else {

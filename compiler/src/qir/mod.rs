@@ -80,6 +80,29 @@ impl QirModule {
         self.global_cbits.push(cbit_id);
         cbit_id
     }
+
+    // --- Added Statistics Methods ---
+
+    pub fn qubit_count(&self) -> usize {
+        let locals: usize = self.functions.iter().map(|f| f.next_qubit_id).sum();
+        self.global_qubits.len() + locals
+    }
+
+    pub fn gate_count(&self) -> usize {
+        self.functions.iter()
+            .flat_map(|f| f.blocks.values())
+            .flat_map(|b| b.ops.iter())
+            .filter(|op| matches!(op, QirOp::ApplyGate { .. }))
+            .count()
+    }
+
+    pub fn measurement_count(&self) -> usize {
+        self.functions.iter()
+            .flat_map(|f| f.blocks.values())
+            .flat_map(|b| b.ops.iter())
+            .filter(|op| matches!(op, QirOp::Measure { .. }))
+            .count()
+    }
 }
 
 impl QirFunction {

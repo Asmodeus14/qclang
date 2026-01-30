@@ -1,12 +1,13 @@
-// src/lib.rs - UPDATED FOR PHASE 1.5 WITH OPTIMIZATION FLAGS
+// compiler/src/lib.rs - PHASE 2.1 INTEGRATION
 pub mod lexer;
 pub mod ast;
 pub mod parser;
-pub mod ir;      
-pub mod qir;     
+pub mod ir;
+pub mod qir;
 pub mod codegen;
 pub mod semantics;
 pub mod error;
+pub mod simulator; // <--- Added: Simulator Module
 
 use lexer::tokenize;
 use parser::Parser;
@@ -15,148 +16,24 @@ use qir::optimizer::QirOptimizer;
 use qir::analysis::QirAnalyzer;
 use semantics::SemanticAnalyzer;
 use codegen::QASMGenerator;
+use qir::QirModule;
+use std::time::SystemTime;
 
 pub const VERSION: &str = "0.6.0";
 
-pub fn build_timestamp() -> &'static str {
-    "2024-01-27 10:00:00"
+// Dynamic build info (requires chrono in Cargo.toml)
+pub fn build_timestamp() -> String {
+    let now = SystemTime::now();
+    let dt = chrono::DateTime::<chrono::Utc>::from(now);
+    dt.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-pub fn git_commit_hash() -> &'static str {
-    "phase1.5-optimizer-integration"
+// Fetches hash from build.rs
+pub fn git_commit_hash() -> String {
+    env!("GIT_HASH").to_string()
 }
 
-pub struct Compiler;
-
-impl Compiler {
-    pub fn new() -> Self {
-        Self
-    }
-    
-    pub fn version() -> &'static str {
-        VERSION
-    }
-    
-    pub fn capabilities() -> Vec<&'static str> {
-        vec![
-            "Phase 1.5: QIR Optimizations",
-            "• Dead Qubit Elimination",
-            "• Gate Cancellation",
-            "• QIR-to-QASM Generation",
-            "• New QIR module with SSA form and linear qubit tracking",
-            "• Type-safe intermediate representation",
-            "• Basic optimization passes: constant folding, dead qubit elimination",
-            "• Control flow representation with basic blocks",
-            "• QIR analysis and verification",
-            "• Gate cancellation optimization",
-            "• Complete QIR-to-QASM translation backend",
-            "Phase 1.4: Semantic Analyzer with Type Registry",
-            "• Multi-pass semantic analysis (collect + analyze)",
-            "• Type Registry for aliases, structs, and built-ins",
-            "• Symbol Table with hierarchical scope management",
-            "• Complete type resolution and compatibility checking",
-            "• Struct field access validation",
-            "• Function signature and call validation",
-            "• Quantum type detection for ownership rules",
-            "• Type coercion (int → float)",
-            "• Control flow statement validation",
-            "• Break/continue statement checking",
-            "• Enhanced error reporting with source context",
-            "Phase 1.3: Enhanced Type System",
-            "• Type aliases with 'type' keyword",
-            "• Struct definitions with 'struct' keyword",
-            "• Tuple types (qubit, qubit, qubit)",
-            "• Member access with dot operator",
-            "• Struct literals",
-            "Standard gates: H, X, Y, Z, CNOT",
-            "Phase 3 gates: RX, RY, RZ, T, S, SWAP",
-            "Quantum control flow: qif, qfor",
-            "Quantum type system with affine types",
-            "OpenQASM 2.0 output",
-            "Compile-time quantum safety",
-            "Quantum registers (qreg)",
-            "Mutable variables (mut keyword)",
-            "Enhanced assignments (+=, -=, *=, /=)",
-        ]
-    }
-    
-    pub fn compile_with_stats(source: &str, optimize: bool) -> Result<(String, CompileStats), Vec<String>> {
-        // LEXING
-        let tokens = tokenize(source);
-        
-        // PARSING
-        let mut parser = Parser::new(tokens.into_iter(), source.to_string());
-        let program = parser.parse_program();
-        
-        if !parser.errors.is_empty() {
-            let errors: Vec<String> = parser.errors
-                .iter()
-                .map(|e| e.to_string())
-                .collect();
-            return Err(errors);
-        }
-        
-        // SEMANTIC ANALYSIS
-        let mut semantic_analyzer = SemanticAnalyzer::new();
-        match semantic_analyzer.analyze_program(&program) {
-            Ok(_) => {
-                for warning in semantic_analyzer.get_warnings() {
-                    eprintln!("Warning: {}", warning);
-                }
-            }
-            Err(errors) => {
-                let error_strings: Vec<String> = errors
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect();
-                return Err(error_strings);
-            }
-        }
-        
-        // QIR GENERATION
-        // println!("Phase 1.5: Generating QIR..."); // Silent by default for cleanliness
-        let mut qir_builder = QirBuilder::new();
-        let mut qir_module = qir_builder.build_from_program(&program);
-        
-        // QIR OPTIMIZATION
-        if optimize {
-            // println!("  Running QIR optimizations...");
-            let optimizer = QirOptimizer::new(true);
-            optimizer.optimize_module(&mut qir_module);
-        }
-        
-        // QIR ANALYSIS
-        let mut analyzer = QirAnalyzer::new();
-        if !analyzer.analyze_module(&qir_module) {
-            return Err(analyzer.get_errors().iter().map(|s| s.clone()).collect());
-        }
-        
-        // Generate QASM
-        let mut qasm_generator = QASMGenerator::new();
-        let qasm_code = qasm_generator.generate(&qir_module);
-        
-        // Stats
-        let stats = CompileStats {
-            qubits: qasm_generator.qubit_count(),
-            cbits: qasm_generator.cbit_count(),
-            gates: qasm_generator.gate_count(),
-            measurements: qasm_generator.measurement_count(),
-        };
-        
-        Ok((qasm_code, stats))
-    }
-    
-    pub fn compile(source: &str) -> Result<String, Vec<String>> {
-        // Default to optimized for general use
-        Self::compile_with_stats(source, true).map(|(s, _)| s)
-    }
-    
-    pub fn compile_with_diagnostics(source: &str) -> (Result<String, Vec<String>>, CompileStats) {
-        Self::compile_with_stats(source, true)
-            .map(|(q, s)| (Ok(q), s))
-            .unwrap_or_else(|e| (Err(e), CompileStats::default()))
-    }
-}
+// --- Return Structures ---
 
 #[derive(Debug, Clone, Copy)]
 pub struct CompileStats {
@@ -178,4 +55,119 @@ impl CompileStats {
 
 impl Default for CompileStats {
     fn default() -> Self { Self::new() }
+}
+
+/// The result of a successful compilation.
+/// Contains the QASM code, statistics, and the IR for simulation.
+pub struct CompilationResult {
+    pub qasm: String,
+    pub stats: CompileStats,
+    pub ir: QirModule, // <--- Exposed for Simulator
+}
+
+// --- Compiler Implementation ---
+
+pub struct Compiler;
+
+impl Compiler {
+    pub fn new() -> Self {
+        Self
+    }
+    
+    pub fn version() -> &'static str {
+        VERSION
+    }
+    
+    pub fn capabilities() -> Vec<&'static str> {
+        vec![
+            "Phase 2.1: Quantum Runtime",
+            "• Statevector Simulation (Local)",
+            "• Execution of QIR modules",
+            "Phase 1.5: QIR Optimizations",
+            "• Dead Qubit Elimination",
+            "• Gate Cancellation",
+            "• QIR-to-QASM Generation",
+            "• Type-safe intermediate representation",
+            "• QIR analysis and verification",
+            "Phase 1.4: Semantic Analyzer",
+            "• Quantum ownership rules",
+            "• Type Registry & Symbol Table",
+            "Standard gates: H, X, Y, Z, CNOT",
+            "Quantum control flow: qif, qfor",
+        ]
+    }
+    
+    // UPDATED: Returns CompilationResult instead of tuple
+    pub fn compile_with_stats(source: &str, optimize: bool) -> Result<CompilationResult, Vec<String>> {
+        // 1. LEXING
+        let tokens = tokenize(source);
+        
+        // 2. PARSING
+        let mut parser = Parser::new(tokens.into_iter(), source.to_string());
+        let program = parser.parse_program();
+        
+        if !parser.errors.is_empty() {
+            return Err(parser.errors.iter().map(|e| e.to_string()).collect());
+        }
+        
+        // 3. SEMANTIC ANALYSIS
+        let mut semantic_analyzer = SemanticAnalyzer::new();
+        match semantic_analyzer.analyze_program(&program) {
+            Ok(_) => {
+                for warning in semantic_analyzer.get_warnings() {
+                    eprintln!("Warning: {}", warning);
+                }
+            }
+            Err(errors) => {
+                return Err(errors.iter().map(|e| e.to_string()).collect());
+            }
+        }
+        
+        // 4. QIR GENERATION
+        let mut qir_builder = QirBuilder::new();
+        let mut qir_module = qir_builder.build_from_program(&program);
+        
+        // 5. QIR OPTIMIZATION
+        if optimize {
+            let optimizer = QirOptimizer::new(true);
+            optimizer.optimize_module(&mut qir_module);
+        }
+        
+        // 6. QIR ANALYSIS (Safety Check)
+        let mut analyzer = QirAnalyzer::new();
+        if !analyzer.analyze_module(&qir_module) {
+            return Err(analyzer.get_errors().iter().map(|s| s.clone()).collect());
+        }
+        
+        // 7. CODE GENERATION (OpenQASM)
+        let mut qasm_generator = QASMGenerator::new();
+        let qasm_code = qasm_generator.generate(&qir_module);
+        
+        // 8. STATS GATHERING
+        let stats = CompileStats {
+            qubits: qasm_generator.qubit_count(),
+            cbits: qasm_generator.cbit_count(),
+            gates: qasm_generator.gate_count(),
+            measurements: qasm_generator.measurement_count(),
+        };
+        
+        Ok(CompilationResult {
+            qasm: qasm_code,
+            stats,
+            ir: qir_module, // Pass the IR out for the simulator
+        })
+    }
+    
+    // Helper for simple QASM string output
+    pub fn compile(source: &str) -> Result<String, Vec<String>> {
+        Self::compile_with_stats(source, true).map(|res| res.qasm)
+    }
+    
+    // Helper for tests/diagnostics
+    pub fn compile_with_diagnostics(source: &str) -> (Result<String, Vec<String>>, CompileStats) {
+        match Self::compile_with_stats(source, true) {
+            Ok(res) => (Ok(res.qasm), res.stats),
+            Err(e) => (Err(e), CompileStats::default()),
+        }
+    }
 }

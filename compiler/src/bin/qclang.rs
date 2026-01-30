@@ -1,4 +1,4 @@
-// compiler/src/bin/qclang.rs - PROFESSIONAL CLI WITH UNIQUE IDENTITY
+// compiler/src/bin/qclang.rs - PROFESSIONAL CLI (PHASE 2.1)
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
@@ -159,7 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Test { pattern, report } => {
             run_tests(pattern, report, cli.verbose)?;
         }
-Commands::Update { tag, latest, force } => {
+        Commands::Update { tag, latest, force } => {
             if let Err(e) = handle_update_command(tag, latest, force) {
                 eprintln!("{} Update failed: {}", "[ERR]".red().bold(), e);
                 
@@ -169,7 +169,7 @@ Commands::Update { tag, latest, force } => {
                     eprintln!("{} Hint: Run with sudo: `sudo qclang update`", "[INFO]".blue().bold());
                 }
 
-                // WINDOWS HINT (New!)
+                // WINDOWS HINT
                 #[cfg(target_os = "windows")]
                 if e.to_string().contains("Access is denied") {
                     eprintln!("\n{}", "PERMISSION ERROR:".red().bold());
@@ -375,10 +375,9 @@ fn compile_files(
     let mut success_count = 0;
     
     let multi = MultiProgress::new();
-    // Unique "Quantum/Tech" Style Loader: █▓▒░ with a cyan/blue gradient bar
     let style = ProgressStyle::with_template("{spinner:.cyan} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}")
         .unwrap()
-        .progress_chars("█▓▒░"); // Unique block characters
+        .progress_chars("█▓▒░");
         
     let main_pb = multi.add(ProgressBar::new(total_files as u64));
     main_pb.set_style(style);
@@ -400,7 +399,7 @@ fn compile_files(
         let result = Compiler::compile_with_stats(&source, optimize);
         
         match result {
-            Ok((qasm, stats)) => {
+            Ok(res) => {
                 success_count += 1;
                 
                 let output_path = if let Some(dir) = output_dir {
@@ -410,16 +409,16 @@ fn compile_files(
                 };
                 
                 match format {
-                    OutputFormat::Qasm => fs::write(&output_path, &qasm)?,
-                    _ => fs::write(&output_path, &qasm)?, 
+                    OutputFormat::Qasm => fs::write(&output_path, &res.qasm)?,
+                    _ => fs::write(&output_path, &res.qasm)?, 
                 }
                 
                 if show {
-                    main_pb.suspend(|| show_generated_code(&qasm, "Generated OpenQASM"));
+                    main_pb.suspend(|| show_generated_code(&res.qasm, "Generated OpenQASM"));
                 }
                 
                 if verbose {
-                    main_pb.suspend(|| print_file_stats(&file_name, &stats));
+                    main_pb.suspend(|| print_file_stats(&file_name, &res.stats));
                 }
             }
             Err(errors) => {
@@ -444,7 +443,7 @@ fn compile_files(
 
 fn run_file(
     input_path: &Path,
-    _simulate: bool,
+    simulate: bool,
     optimize: bool,
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -457,7 +456,7 @@ fn run_file(
     let elapsed = start_time.elapsed();
     
     match result {
-        Ok((qasm, stats)) => {
+        Ok(res) => {
             let opt_status = if optimize { "Yes" } else { "No" };
             
             println!("{}", "Compilation Summary".bold().underline());
@@ -467,21 +466,41 @@ fn run_file(
             println!("{:<15}: {}", "Output", "OpenQASM 2.0");
             println!();
 
-            print_circuit_diagram(&stats);
+            print_circuit_diagram(&res.stats);
             
             println!("\n{}", "Circuit Statistics".bold().underline());
-            println!("{:<15}: {}", "Qubits", stats.qubits);
-            println!("{:<15}: {}", "Gates", stats.gates);
-            println!("{:<15}: {}", "Measurements", stats.measurements);
-            println!("{:<15}: {}", "Depth", stats.gates); // Approx
+            println!("{:<15}: {}", "Qubits", res.stats.qubits);
+            println!("{:<15}: {}", "Gates", res.stats.gates);
+            println!("{:<15}: {}", "Measurements", res.stats.measurements);
+            println!("{:<15}: {}", "Depth", res.stats.gates);
             println!();
 
+            // === SIMULATION BLOCK ===
+            if simulate {
+                println!("{}", "Quantum Simulation".bold().underline());
+                println!("{} Initializing Statevector Simulator...", "[INFO]".blue().bold());
+                
+                let mut sim = qclang_compiler::simulator::Simulator::new();
+                match sim.execute(&res.ir) {
+                    Ok(log) => {
+                        // Print raw log (cleaned of internal emojis if they existed in lib)
+                        println!("{}", log.replace("🚀 ", "").replace("🏁 ", ""));
+                        println!("{} Simulation finished successfully.", "[OK]".green().bold());
+                    }
+                    Err(e) => {
+                        println!("{} Simulation Error: {}", "[ERR]".red().bold(), e);
+                    }
+                }
+                println!();
+            }
+            // ========================
+
             let output_path = input_path.with_extension("qasm");
-            fs::write(&output_path, &qasm)?;
+            fs::write(&output_path, &res.qasm)?;
             println!("{} Output written to {}", "[OK]".green().bold(), output_path.display());
             
             if verbose {
-                show_generated_code(&qasm, "Generated OpenQASM");
+                show_generated_code(&res.qasm, "Generated OpenQASM");
             }
         }
         Err(errors) => {
@@ -558,8 +577,10 @@ fn start_repl() -> Result<(), Box<dyn std::error::Error>> {
         if input.is_empty() { continue; }
         
         if input.starts_with("fn") {
+            // Note: REPL logic might need updates if we want to run simulation here too,
+            // but for now we keep it simple compilation.
             match Compiler::compile_with_stats(input, true) {
-                Ok((qasm, _)) => println!("{}", qasm),
+                Ok(res) => println!("{}", res.qasm),
                 Err(e) => for err in e { println!("Error: {}", err); }
             }
         } else {
