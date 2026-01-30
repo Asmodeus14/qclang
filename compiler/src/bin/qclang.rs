@@ -159,13 +159,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Test { pattern, report } => {
             run_tests(pattern, report, cli.verbose)?;
         }
-        Commands::Update { tag, latest, force } => {
+Commands::Update { tag, latest, force } => {
             if let Err(e) = handle_update_command(tag, latest, force) {
                 eprintln!("{} Update failed: {}", "[ERR]".red().bold(), e);
+                
+                // LINUX HINT
                 #[cfg(target_os = "linux")]
                 if e.to_string().contains("Permission denied") {
-                    eprintln!("{} Hint: You may need to run with sudo: `sudo qclang update`", "[INFO]".blue().bold());
+                    eprintln!("{} Hint: Run with sudo: `sudo qclang update`", "[INFO]".blue().bold());
                 }
+
+                // WINDOWS HINT (New!)
+                #[cfg(target_os = "windows")]
+                if e.to_string().contains("Access is denied") {
+                    eprintln!("\n{}", "PERMISSION ERROR:".red().bold());
+                    eprintln!("  Windows blocked the update because QCLang is installed in a protected folder.");
+                    eprintln!("  To fix this:");
+                    eprintln!("  1. Close this terminal.");
+                    eprintln!("  2. Right-click your terminal icon.");
+                    eprintln!("  3. Select 'Run as Administrator'.");
+                    eprintln!("  4. Run `qclang update` again.");
+                }
+                
                 std::process::exit(1);
             }
         }
